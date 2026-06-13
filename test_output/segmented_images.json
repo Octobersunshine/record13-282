@@ -1,0 +1,26 @@
+{
+  "img1": {
+    "segmented": true,
+    "data": {
+      "mime_type": "image/png",
+      "compressed": false,
+      "total_segments": 3,
+      "segment_length": 50,
+      "total_size_bytes": 84,
+      "header": "data:image/png;base64,",
+      "segments": [
+        "iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0",
+        "lEQVR4nGP4n2JENmIY1TyqeVTzqGajAdUMAH0feO8iEdTMAAAA",
+        "AElFTkSuQmCC"
+      ]
+    },
+    "filename": "test_image1.png",
+    "size_bytes": 84
+  },
+  "img2": {
+    "segmented": false,
+    "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAPCAIAAAB82OjLAAAAHElEQVR4nGMwmvafRohh1OhRo0eNHjV62kgzGgBkix/8TIp5EwAAAABJRU5ErkJggg==",
+    "filename": "test_image2.png",
+    "size_bytes": 85
+  }
+}

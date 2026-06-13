@@ -4,6 +4,7 @@ import json
 import base64
 import struct
 import zlib
+import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,6 +42,12 @@ def create_test_png(filepath, width=10, height=10, color=(255, 100, 50)):
     return filepath
 
 
+def create_large_test_png(filepath, size_kb=50):
+    width = 200
+    height = (size_kb * 1024) // (width * 3) + 10
+    return create_test_png(filepath, width=width, height=height, color=(100, 150, 200))
+
+
 def run_tests():
     test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_output')
     os.makedirs(test_dir, exist_ok=True)
@@ -51,11 +58,18 @@ def run_tests():
 
     test_image1 = os.path.join(test_dir, 'test_image1.png')
     test_image2 = os.path.join(test_dir, 'test_image2.png')
+    large_image = os.path.join(test_dir, 'large_image.png')
+
     create_test_png(test_image1, 20, 20, (255, 100, 50))
     create_test_png(test_image2, 30, 15, (50, 150, 255))
+    create_large_test_png(large_image, size_kb=50)
+
     print(f"\n[✓] 已创建测试图片:")
-    print(f"    - {test_image1}")
-    print(f"    - {test_image2}")
+    print(f"    - {test_image1} ({os.path.getsize(test_image1)} 字节)")
+    print(f"    - {test_image2} ({os.path.getsize(test_image2)} 字节)")
+    print(f"    - {large_image} ({os.path.getsize(large_image)} 字节)")
+
+    Base64ImageService.set_warnings_enabled(False)
 
     print("\n" + "-" * 60)
     print("测试 1: 图片文件编码为 DataURL")
@@ -182,12 +196,238 @@ def run_tests():
         print(f"    {ext} -> {mime}")
 
     print("\n" + "=" * 60)
-    print("所有测试通过! ✓")
+    print("大图片处理专项测试")
+    print("=" * 60)
+
+    print("\n" + "-" * 60)
+    print("测试 13: 图片文件信息检测")
+    print("-" * 60)
+    info = Base64ImageService.get_file_info(test_image1)
+    assert info['size_bytes'] > 0, "文件大小应为正数"
+    assert info['mime_type'] == 'image/png', "MIME 类型错误"
+    assert 'size_human' in info, "缺少人类可读大小"
+    assert 'base64_estimated_bytes' in info, "缺少预估大小"
+    print(f"[✓] 文件信息检测成功:")
+    print(f"    文件名: {info['filename']}")
+    print(f"    大小: {info['size_human']}")
+    print(f"    Base64 预估大小: {info['base64_estimated_human']}")
+    print(f"    是否为大图片: {info['is_large']}")
+
+    print("\n" + "-" * 60)
+    print("测试 14: 大图片警告提示")
+    print("-" * 60)
+    original_warn_size = Base64ImageService.warn_size
+    Base64ImageService.set_warn_size(50)
+    Base64ImageService.set_warnings_enabled(True)
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        Base64ImageService.encode_file(test_image1)
+        assert len(w) >= 1, "应该触发警告"
+        assert issubclass(w[0].category, UserWarning), "应该是 UserWarning"
+        print(f"[✓] 大图片警告正常触发: {w[0].message}")
+
+    Base64ImageService.set_warn_size(original_warn_size)
+    Base64ImageService.set_warnings_enabled(False)
+
+    print("\n" + "-" * 60)
+    print("测试 15: 压缩编码与解码（zlib）")
+    print("-" * 60)
+    compressed_data_url = Base64ImageService.encode_file(test_image1, compress=True)
+    assert ';base64;zlib,' in compressed_data_url, "压缩 DataURL 格式错误"
+    print(f"[✓] 压缩编码成功")
+    print(f"    原始长度: {len(data_url1)} 字符")
+    print(f"    压缩后长度: {len(compressed_data_url)} 字符")
+
+    decoded_compressed, mime_compressed = Base64ImageService.decode_to_bytes(compressed_data_url)
+    assert decoded_compressed == img_bytes, "压缩解码后数据不匹配"
+    assert mime_compressed == 'image/png', "压缩后 MIME 类型错误"
+    print(f"[✓] 压缩解码成功，数据完全一致")
+
+    print("\n" + "-" * 60)
+    print("测试 16: 字节数据压缩编码")
+    print("-" * 60)
+    compressed_bytes_url = Base64ImageService.encode_bytes(img_bytes, 'image/png', compress=True)
+    assert ';base64;zlib,' in compressed_bytes_url, "压缩字节编码格式错误"
+    decoded_cb, _ = Base64ImageService.decode_to_bytes(compressed_bytes_url)
+    assert decoded_cb == img_bytes, "压缩字节解码后数据不匹配"
+    print("[✓] 字节压缩编码与解码成功")
+
+    print("\n" + "-" * 60)
+    print("测试 17: 流式编码（大图片分块处理）")
+    print("-" * 60)
+    original_chunk = Base64ImageService.chunk_size
+    Base64ImageService.set_chunk_size(100)
+
+    stream_result = list(Base64ImageService.encode_file_streaming(test_image1))
+    assert len(stream_result) > 1, "流式编码应该产生多个数据块"
+    assert stream_result[0].startswith('data:image/png;base64,'), "首块应为 header"
+
+    full_stream_url = ''.join(stream_result)
+    assert full_stream_url == data_url1, "流式编码结果应与一次性编码一致"
+    print(f"[✓] 流式编码成功")
+    print(f"    分块数量: {len(stream_result)}")
+    print(f"    拼接后与直接编码一致: 是")
+
+    Base64ImageService.set_chunk_size(original_chunk)
+
+    print("\n" + "-" * 60)
+    print("测试 18: 流式编码 + 压缩")
+    print("-" * 60)
+    Base64ImageService.set_chunk_size(200)
+    stream_compressed = list(Base64ImageService.encode_file_streaming(test_image1, compress=True))
+    assert len(stream_compressed) > 1, "压缩流式编码应产生多个数据块"
+    assert stream_compressed[0].startswith('data:image/png;base64;zlib,'), "压缩流式 header 格式错误"
+
+    full_compressed_url = ''.join(stream_compressed)
+    decoded_stream_comp, _ = Base64ImageService.decode_to_bytes(full_compressed_url)
+    assert decoded_stream_comp == img_bytes, "压缩流式编码解码后数据不匹配"
+    print(f"[✓] 压缩流式编码成功")
+    print(f"    分块数量: {len(stream_compressed)}")
+    print(f"    解码后数据一致: 是")
+
+    Base64ImageService.set_chunk_size(original_chunk)
+
+    print("\n" + "-" * 60)
+    print("测试 19: 分段编码（JSON 分段存储）")
+    print("-" * 60)
+    original_seg_len = Base64ImageService.segment_length
+    Base64ImageService.set_segment_length(30)
+
+    segmented = Base64ImageService.encode_file_segmented(test_image1)
+    assert segmented['total_segments'] > 1, "应该产生多个分段"
+    assert len(segmented['segments']) == segmented['total_segments'], "分段数量不匹配"
+    assert 'header' in segmented, "缺少 header"
+    assert 'mime_type' in segmented, "缺少 mime_type"
+    print(f"[✓] 分段编码成功")
+    print(f"    分段数量: {segmented['total_segments']}")
+    print(f"    每段长度: {segmented['segment_length']}")
+
+    reassembled = Base64ImageService.reassemble_segmented(segmented)
+    assert reassembled == data_url1, "分段重组后与原始 DataURL 不一致"
+    print(f"[✓] 分段重组成功，与原始数据一致")
+
+    Base64ImageService.set_segment_length(original_seg_len)
+
+    print("\n" + "-" * 60)
+    print("测试 20: 分段编码 + 压缩")
+    print("-" * 60)
+    Base64ImageService.set_segment_length(40)
+    segmented_comp = Base64ImageService.encode_file_segmented(test_image1, compress=True)
+    assert segmented_comp['compressed'] == True, "compressed 标记应为 True"
+    assert 'zlib' in segmented_comp['header'], "header 应包含 zlib 标识"
+
+    reassembled_comp = Base64ImageService.reassemble_segmented(segmented_comp)
+    decoded_seg_comp, _ = Base64ImageService.decode_to_bytes(reassembled_comp)
+    assert decoded_seg_comp == img_bytes, "分段压缩重组解码后数据不匹配"
+    print(f"[✓] 分段压缩编码成功")
+    print(f"    分段数量: {segmented_comp['total_segments']}")
+    print(f"    解码后数据一致: 是")
+
+    Base64ImageService.set_segment_length(original_seg_len)
+
+    print("\n" + "-" * 60)
+    print("测试 21: JSON 分段存储嵌入")
+    print("-" * 60)
+    Base64ImageService.set_segment_length(50)
+    json_seg = Base64ImageService.embed_in_json(test_image1, key='photo', segmented=True)
+    assert isinstance(json_seg['photo'], dict), "分段数据应为 dict"
+    assert 'segments' in json_seg['photo'], "缺少 segments 字段"
+    assert 'header' in json_seg['photo'], "缺少 header 字段"
+    print(f"[✓] JSON 分段嵌入成功")
+    print(f"    分段数: {len(json_seg['photo']['segments'])}")
+
+    print("\n" + "-" * 60)
+    print("测试 22: create_json_payload 分段模式")
+    print("-" * 60)
+    seg_json_images = [
+        {'path': test_image1, 'key': 'img1', 'segmented': True},
+        {'path': test_image2, 'key': 'img2', 'segmented': False},
+    ]
+    seg_json_path = os.path.join(test_dir, 'segmented_images.json')
+    seg_payload = Base64ImageService.create_json_payload(
+        seg_json_images, output_path=seg_json_path, segmented=False
+    )
+    assert seg_payload['img1']['segmented'] == True, "img1 应为分段模式"
+    assert seg_payload['img2']['segmented'] == False, "img2 应为非分段模式"
+    assert os.path.isfile(seg_json_path), "分段 JSON 文件未生成"
+    print(f"[✓] 混合模式 JSON 负载生成成功")
+    print(f"    分段图片: img1")
+    print(f"    普通图片: img2")
+
+    print("\n" + "-" * 60)
+    print("测试 23: 从分段 JSON 中提取图片")
+    print("-" * 60)
+    with open(seg_json_path, 'r', encoding='utf-8') as f:
+        seg_json_data = json.load(f)
+    extracted_seg = Base64ImageService.extract_from_json(seg_json_data)
+    assert len(extracted_seg) == 2, f"应提取 2 张图片，实际 {len(extracted_seg)} 张"
+
+    seg_items = [x for x in extracted_seg if x.get('segmented')]
+    normal_items = [x for x in extracted_seg if not x.get('segmented')]
+    assert len(seg_items) == 1, "应有 1 张分段图片"
+    assert len(normal_items) == 1, "应有 1 张普通图片"
+    print(f"[✓] 从分段 JSON 中提取成功")
+    print(f"    分段图片: {len(seg_items)} 张")
+    print(f"    普通图片: {len(normal_items)} 张")
+
+    for item in extracted_seg:
+        decoded_item, _ = Base64ImageService.decode_to_bytes(item['data_url'])
+        assert len(decoded_item) == item['size_bytes'], "提取的图片大小不匹配"
+    print(f"[✓] 所有提取的图片数据验证通过")
+
+    print("\n" + "-" * 60)
+    print("测试 24: 压缩后大图片体积对比")
+    print("-" * 60)
+    large_original = Base64ImageService.encode_file(large_image, compress=False)
+    large_compressed = Base64ImageService.encode_file(large_image, compress=True)
+
+    orig_size = len(large_original)
+    comp_size = len(large_compressed)
+    ratio = (1 - comp_size / orig_size) * 100 if orig_size > 0 else 0
+
+    print(f"[✓] 大图片压缩对比:")
+    print(f"    原始大小: {Base64ImageService._format_size(orig_size)}")
+    print(f"    压缩后大小: {Base64ImageService._format_size(comp_size)}")
+    print(f"    压缩率: {ratio:.2f}%")
+
+    decoded_large, _ = Base64ImageService.decode_to_bytes(large_compressed)
+    with open(large_image, 'rb') as f:
+        large_bytes = f.read()
+    assert decoded_large == large_bytes, "大图片压缩解压后数据不匹配"
+    print(f"[✓] 大图片压缩解压验证通过")
+
+    print("\n" + "-" * 60)
+    print("测试 25: 配置参数设置与读取")
+    print("-" * 60)
+    old_warn = Base64ImageService.warn_size
+    old_chunk = Base64ImageService.chunk_size
+    old_seg = Base64ImageService.segment_length
+
+    Base64ImageService.set_warn_size(2 * 1024 * 1024)
+    Base64ImageService.set_chunk_size(128 * 1024)
+    Base64ImageService.set_segment_length(120)
+    Base64ImageService.set_warnings_enabled(True)
+
+    assert Base64ImageService.warn_size == 2 * 1024 * 1024
+    assert Base64ImageService.chunk_size == 128 * 1024
+    assert Base64ImageService.segment_length == 120
+    assert Base64ImageService.enable_warnings == True
+
+    Base64ImageService.set_warn_size(old_warn)
+    Base64ImageService.set_chunk_size(old_chunk)
+    Base64ImageService.set_segment_length(old_seg)
+    Base64ImageService.set_warnings_enabled(False)
+
+    print(f"[✓] 所有配置参数设置正常")
+
+    print("\n" + "=" * 60)
+    print("所有 25 项测试通过! ✓")
     print("=" * 60)
     print(f"\n测试输出目录: {test_dir}")
     print("\n生成的文件:")
     for root, dirs, files in os.walk(test_dir):
-        for f in files:
+        for f in sorted(files):
             filepath = os.path.join(root, f)
             size = os.path.getsize(filepath)
             print(f"  {os.path.relpath(filepath, test_dir)} ({size} 字节)")

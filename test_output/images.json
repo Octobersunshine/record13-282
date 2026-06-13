@@ -1,10 +1,12 @@
 {
   "thumbnail": {
+    "segmented": false,
     "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP4n2JENmIY1TyqeVTzqGajAdUMAH0feO8iEdTMAAAAAElFTkSuQmCC",
     "filename": "test_image1.png",
     "size_bytes": 84
   },
   "banner": {
+    "segmented": false,
     "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAPCAIAAAB82OjLAAAAHElEQVR4nGMwmvafRohh1OhRo0eNHjV62kgzGgBkix/8TIp5EwAAAABJRU5ErkJggg==",
     "filename": "test_image2.png",
     "size_bytes": 85
