@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "created_at": "2026-06-14T05:58:05.897354",
+  "settings": {
+    "compress": false,
+    "segmented": false,
+    "include_html": true,
+    "include_json": true
+  },
+  "summary": {
+    "total_images": 3,
+    "total_original_size_bytes": 497,
+    "total_original_size_human": "497 B",
+    "total_encoded_size_bytes": 734,
+    "total_encoded_size_human": "734 B",
+    "compression_ratio": -47.69
+  },
+  "images": [
+    {
+      "index": 0,
+      "key": "logo",
+      "filename": "test_image1.png",
+      "original_path": "E:\\temp\\record13\\282\\test_output\\test_image1.png",
+      "alt": "Logo 图片",
+      "mime_type": "image/png",
+      "original_size_bytes": 84,
+      "original_size_human": "84 B",
+      "encoded_size_bytes": 134,
+      "encoded_size_human": "134 B"
+    },
+    {
+      "index": 1,
+      "key": "banner",
+      "filename": "test_image2.png",
+      "original_path": "E:\\temp\\record13\\282\\test_output\\test_image2.png",
+      "alt": "Banner 图片",
+      "mime_type": "image/png",
+      "original_size_bytes": 85,
+      "original_size_human": "85 B",
+      "encoded_size_bytes": 138,
+      "encoded_size_human": "138 B"
+    },
+    {
+      "index": 2,
+      "key": "photo",
+      "filename": "large_image.png",
+      "original_path": "E:\\temp\\record13\\282\\test_output\\large_image.png",
+      "alt": "大图照片",
+      "mime_type": "image/png",
+      "original_size_bytes": 328,
+      "original_size_human": "328 B",
+      "encoded_size_bytes": 462,
+      "encoded_size_human": "462 B"
+    }
+  ]
+}

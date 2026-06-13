@@ -5,8 +5,10 @@ import os
 import zlib
 import warnings
 import io
+import zipfile
+import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Iterator, Any
+from typing import Dict, List, Optional, Tuple, Union, Iterator, Any, BinaryIO
 
 
 class Base64ImageService:
@@ -479,3 +481,237 @@ class Base64ImageService:
             saved_files.append(filepath)
 
         return saved_files
+
+    @classmethod
+    def _build_batch_manifest(cls, images: List[Dict[str, Any]],
+                              compress: bool,
+                              segmented: bool,
+                              include_html: bool,
+                              include_json: bool) -> Dict[str, Any]:
+        image_entries = []
+        total_original_size = 0
+        total_encoded_size = 0
+
+        for idx, img in enumerate(images):
+            path = img.get('path', '')
+            key = img.get('key', f'image_{idx}')
+            alt = img.get('alt', os.path.basename(path))
+
+            file_size = os.path.getsize(path) if os.path.isfile(path) else 0
+            mime = cls._get_mime_type(path)
+
+            info = {
+                'index': idx,
+                'key': key,
+                'filename': os.path.basename(path),
+                'original_path': path,
+                'alt': alt,
+                'mime_type': mime,
+                'original_size_bytes': file_size,
+                'original_size_human': cls._format_size(file_size),
+            }
+
+            if os.path.isfile(path):
+                data_url = cls.encode_file(path, compress=compress, check_size=False)
+                info['encoded_size_bytes'] = len(data_url)
+                info['encoded_size_human'] = cls._format_size(len(data_url))
+                total_original_size += file_size
+                total_encoded_size += len(data_url)
+
+            image_entries.append(info)
+
+        return {
+            'version': '1.0',
+            'created_at': datetime.datetime.now().isoformat(),
+            'settings': {
+                'compress': compress,
+                'segmented': segmented,
+                'include_html': include_html,
+                'include_json': include_json,
+            },
+            'summary': {
+                'total_images': len(image_entries),
+                'total_original_size_bytes': total_original_size,
+                'total_original_size_human': cls._format_size(total_original_size),
+                'total_encoded_size_bytes': total_encoded_size,
+                'total_encoded_size_human': cls._format_size(total_encoded_size),
+                'compression_ratio': (
+                    round((1 - total_encoded_size / total_original_size) * 100, 2)
+                    if total_original_size > 0 else 0
+                ),
+            },
+            'images': image_entries,
+        }
+
+    @classmethod
+    def batch_embed_to_zip(cls, images: List[Dict[str, Any]],
+                           output_path: Optional[str] = None,
+                           include_html: bool = True,
+                           include_json: bool = True,
+                           include_manifest: bool = True,
+                           compress: bool = False,
+                           segmented: bool = False,
+                           html_title: str = 'Base64 Image Gallery',
+                           zip_compression: int = zipfile.ZIP_DEFLATED) -> Union[str, bytes]:
+        if not images:
+            raise ValueError("图片列表不能为空")
+
+        for img in images:
+            path = img.get('path', '')
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"图片文件不存在: {path}")
+
+        manifest = None
+        if include_manifest:
+            manifest = cls._build_batch_manifest(
+                images, compress, segmented, include_html, include_json
+            )
+
+        json_payload = None
+        if include_json:
+            json_payload = cls.create_json_payload(
+                images, compress=compress, segmented=segmented
+            )
+
+        html_content = None
+        if include_html:
+            html_images = []
+            for img in images:
+                html_img = dict(img)
+                if 'compress' not in html_img:
+                    html_img['compress'] = compress
+                html_images.append(html_img)
+            html_content = cls.create_html_page(html_images, title=html_title)
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', compression=zip_compression) as zf:
+            if include_html and html_content:
+                zf.writestr('gallery.html', html_content.encode('utf-8'))
+
+            if include_json and json_payload:
+                zf.writestr('images.json', json.dumps(
+                    json_payload, ensure_ascii=False, indent=2
+                ).encode('utf-8'))
+
+            if include_manifest and manifest:
+                zf.writestr('manifest.json', json.dumps(
+                    manifest, ensure_ascii=False, indent=2
+                ).encode('utf-8'))
+
+        zip_bytes = zip_buffer.getvalue()
+
+        if output_path:
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)) or '.', exist_ok=True)
+            with open(output_path, 'wb') as f:
+                f.write(zip_bytes)
+            return output_path
+        else:
+            return zip_bytes
+
+    @classmethod
+    def batch_embed_to_directory(cls, images: List[Dict[str, Any]],
+                                 output_dir: str,
+                                 include_html: bool = True,
+                                 include_json: bool = True,
+                                 include_manifest: bool = True,
+                                 compress: bool = False,
+                                 segmented: bool = False,
+                                 html_title: str = 'Base64 Image Gallery') -> Dict[str, str]:
+        if not images:
+            raise ValueError("图片列表不能为空")
+
+        for img in images:
+            path = img.get('path', '')
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"图片文件不存在: {path}")
+
+        os.makedirs(output_dir, exist_ok=True)
+        generated_files = {}
+
+        if include_manifest:
+            manifest = cls._build_batch_manifest(
+                images, compress, segmented, include_html, include_json
+            )
+            manifest_path = os.path.join(output_dir, 'manifest.json')
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
+            generated_files['manifest'] = manifest_path
+
+        if include_json:
+            json_payload = cls.create_json_payload(
+                images, compress=compress, segmented=segmented
+            )
+            json_path = os.path.join(output_dir, 'images.json')
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(json_payload, f, ensure_ascii=False, indent=2)
+            generated_files['json'] = json_path
+
+        if include_html:
+            html_images = []
+            for img in images:
+                html_img = dict(img)
+                if 'compress' not in html_img:
+                    html_img['compress'] = compress
+                html_images.append(html_img)
+            html_path = os.path.join(output_dir, 'gallery.html')
+            cls.create_html_page(html_images, title=html_title, output_path=html_path)
+            generated_files['html'] = html_path
+
+        return generated_files
+
+    @classmethod
+    def extract_from_zip(cls, zip_path: str,
+                         output_dir: str = 'extracted_batch') -> Dict[str, Any]:
+        if not os.path.isfile(zip_path):
+            raise FileNotFoundError(f"压缩包不存在: {zip_path}")
+
+        os.makedirs(output_dir, exist_ok=True)
+        result = {
+            'zip_path': zip_path,
+            'output_dir': output_dir,
+            'manifest': None,
+            'extracted_files': [],
+            'restored_images': [],
+        }
+
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zip_files = zf.namelist()
+
+            if 'manifest.json' in zip_files:
+                manifest_data = zf.read('manifest.json').decode('utf-8')
+                result['manifest'] = json.loads(manifest_data)
+                manifest_path = os.path.join(output_dir, 'manifest.json')
+                with open(manifest_path, 'w', encoding='utf-8') as f:
+                    f.write(manifest_data)
+                result['extracted_files'].append(manifest_path)
+
+            if 'images.json' in zip_files:
+                json_data = zf.read('images.json').decode('utf-8')
+                json_path = os.path.join(output_dir, 'images.json')
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    f.write(json_data)
+                result['extracted_files'].append(json_path)
+
+                extracted = cls.extract_from_json(json_data)
+                img_dir = os.path.join(output_dir, 'images')
+                os.makedirs(img_dir, exist_ok=True)
+                for idx, item in enumerate(extracted):
+                    ext = cls._get_extension_from_mime(item['mime_type'])
+                    filename = f"image_{idx}{ext}"
+                    filepath = os.path.join(img_dir, filename)
+                    cls.decode_to_file(item['data_url'], filepath)
+                    result['restored_images'].append({
+                        'path': filepath,
+                        'mime_type': item['mime_type'],
+                        'size_bytes': item['size_bytes'],
+                        'segmented': item.get('segmented', False),
+                    })
+
+            if 'gallery.html' in zip_files:
+                html_data = zf.read('gallery.html').decode('utf-8')
+                html_path = os.path.join(output_dir, 'gallery.html')
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(html_data)
+                result['extracted_files'].append(html_path)
+
+        return result

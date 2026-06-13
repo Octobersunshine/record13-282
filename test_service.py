@@ -422,7 +422,203 @@ def run_tests():
     print(f"[✓] 所有配置参数设置正常")
 
     print("\n" + "=" * 60)
-    print("所有 25 项测试通过! ✓")
+    print("批量嵌入专项测试")
+    print("=" * 60)
+
+    print("\n" + "-" * 60)
+    print("测试 26: 批量嵌入到目录（HTML + JSON + Manifest）")
+    print("-" * 60)
+    batch_images = [
+        {'path': test_image1, 'key': 'logo', 'alt': 'Logo 图片', 'width': '100px'},
+        {'path': test_image2, 'key': 'banner', 'alt': 'Banner 图片', 'width': '150px'},
+        {'path': large_image, 'key': 'photo', 'alt': '大图照片', 'width': '300px'},
+    ]
+    batch_dir = os.path.join(test_dir, 'batch_output')
+    batch_files = Base64ImageService.batch_embed_to_directory(
+        batch_images, output_dir=batch_dir,
+        include_html=True, include_json=True, include_manifest=True,
+        compress=False, html_title='我的批量图库'
+    )
+    assert 'html' in batch_files, "缺少 HTML 文件"
+    assert 'json' in batch_files, "缺少 JSON 文件"
+    assert 'manifest' in batch_files, "缺少 Manifest 文件"
+    for f in batch_files.values():
+        assert os.path.isfile(f), f"文件不存在: {f}"
+    print(f"[✓] 批量嵌入到目录成功")
+    for k, v in batch_files.items():
+        print(f"    {k}: {v} ({os.path.getsize(v)} 字节)")
+
+    print("\n" + "-" * 60)
+    print("测试 27: Manifest 清单内容验证")
+    print("-" * 60)
+    with open(batch_files['manifest'], 'r', encoding='utf-8') as f:
+        manifest = json.load(f)
+    assert manifest['version'] == '1.0', "Manifest 版本错误"
+    assert manifest['summary']['total_images'] == 3, "图片数量统计错误"
+    assert 'settings' in manifest, "缺少 settings"
+    assert 'images' in manifest, "缺少 images 列表"
+    assert len(manifest['images']) == 3, "images 列表长度错误"
+    for img_entry in manifest['images']:
+        assert 'filename' in img_entry
+        assert 'original_size_bytes' in img_entry
+        assert 'encoded_size_bytes' in img_entry
+    print(f"[✓] Manifest 验证通过")
+    print(f"    图片总数: {manifest['summary']['total_images']}")
+    print(f"    原始总大小: {manifest['summary']['total_original_size_human']}")
+    print(f"    编码后总大小: {manifest['summary']['total_encoded_size_human']}")
+
+    print("\n" + "-" * 60)
+    print("测试 28: 批量嵌入为 ZIP 压缩包（保存到文件）")
+    print("-" * 60)
+    zip_path = os.path.join(test_dir, 'batch_images.zip')
+    result_zip_path = Base64ImageService.batch_embed_to_zip(
+        batch_images, output_path=zip_path,
+        include_html=True, include_json=True, include_manifest=True,
+        compress=False, html_title='ZIP 批量图库'
+    )
+    assert result_zip_path == zip_path, "返回路径不匹配"
+    assert os.path.isfile(zip_path), "ZIP 文件未生成"
+    zip_size = os.path.getsize(zip_path)
+    assert zip_size > 0, "ZIP 文件为空"
+    print(f"[✓] ZIP 压缩包生成成功")
+    print(f"    路径: {zip_path}")
+    print(f"    大小: {Base64ImageService._format_size(zip_size)}")
+
+    print("\n" + "-" * 60)
+    print("测试 29: 批量嵌入为 ZIP 压缩包（返回内存字节）")
+    print("-" * 60)
+    zip_bytes = Base64ImageService.batch_embed_to_zip(
+        batch_images, output_path=None,
+        include_html=True, include_json=True, include_manifest=True,
+        compress=False
+    )
+    assert isinstance(zip_bytes, bytes), "返回类型应为 bytes"
+    assert len(zip_bytes) > 0, "返回字节为空"
+    assert zip_bytes[:2] == b'PK', "ZIP 文件头错误"
+    print(f"[✓] ZIP 内存字节生成成功")
+    print(f"    字节数: {len(zip_bytes)}")
+    print(f"    文件头校验: 通过 (PK)")
+
+    print("\n" + "-" * 60)
+    print("测试 30: ZIP 压缩包内容完整性验证")
+    print("-" * 60)
+    import zipfile as zf
+    with zf.ZipFile(zip_path, 'r') as zip_ref:
+        zip_name_list = zip_ref.namelist()
+        assert 'gallery.html' in zip_name_list, "缺少 gallery.html"
+        assert 'images.json' in zip_name_list, "缺少 images.json"
+        assert 'manifest.json' in zip_name_list, "缺少 manifest.json"
+        print(f"[✓] ZIP 内文件列表验证通过")
+        for name in zip_name_list:
+            info = zip_ref.getinfo(name)
+            print(f"    {name} ({info.file_size} 字节)")
+
+    print("\n" + "-" * 60)
+    print("测试 31: 从 ZIP 中反向提取并还原图片")
+    print("-" * 60)
+    extract_zip_dir = os.path.join(test_dir, 'extracted_zip')
+    extract_result = Base64ImageService.extract_from_zip(
+        zip_path, output_dir=extract_zip_dir
+    )
+    assert extract_result['manifest'] is not None, "Manifest 未提取"
+    assert len(extract_result['extracted_files']) >= 3, "提取文件数不足"
+    assert len(extract_result['restored_images']) == 3, "还原图片数量不匹配"
+    for restored in extract_result['restored_images']:
+        assert os.path.isfile(restored['path']), f"还原文件不存在: {restored['path']}"
+        assert restored['size_bytes'] > 0, "还原文件为空"
+    print(f"[✓] 从 ZIP 提取还原成功")
+    print(f"    提取文件数: {len(extract_result['extracted_files'])}")
+    print(f"    还原图片数: {len(extract_result['restored_images'])}")
+    for restored in extract_result['restored_images']:
+        print(f"    - {os.path.basename(restored['path'])} ({restored['size_bytes']} 字节)")
+
+    print("\n" + "-" * 60)
+    print("测试 32: 还原图片内容与原始一致")
+    print("-" * 60)
+    with open(test_image1, 'rb') as f:
+        original1 = f.read()
+    with open(test_image2, 'rb') as f:
+        original2 = f.read()
+    with open(large_image, 'rb') as f:
+        original_large = f.read()
+    original_list = [original1, original2, original_large]
+
+    for idx, restored in enumerate(extract_result['restored_images']):
+        with open(restored['path'], 'rb') as f:
+            restored_bytes = f.read()
+        assert restored_bytes == original_list[idx], f"图片 {idx} 还原后内容不一致"
+    print(f"[✓] 所有 {len(extract_result['restored_images'])} 张图片还原后与原始完全一致")
+
+    print("\n" + "-" * 60)
+    print("测试 33: 批量嵌入 + 压缩模式")
+    print("-" * 60)
+    zip_compressed_path = os.path.join(test_dir, 'batch_compressed.zip')
+    Base64ImageService.batch_embed_to_zip(
+        batch_images, output_path=zip_compressed_path,
+        include_html=False, include_json=True, include_manifest=True,
+        compress=True, segmented=False
+    )
+    assert os.path.isfile(zip_compressed_path), "压缩模式 ZIP 未生成"
+
+    with zf.ZipFile(zip_compressed_path, 'r') as zc:
+        zc_files = zc.namelist()
+        assert 'gallery.html' not in zc_files, "不应包含 HTML"
+        assert 'images.json' in zc_files, "应包含 JSON"
+        json_raw = zc.read('images.json').decode('utf-8')
+        json_data = json.loads(json_raw)
+        first_key = list(json_data.keys())[0]
+        assert json_data[first_key]['data_url'].startswith('data:image/png;base64;zlib,'), \
+            "压缩模式下应包含 zlib 标识"
+
+    print(f"[✓] 压缩模式批量嵌入成功")
+    print(f"    ZIP 大小: {Base64ImageService._format_size(os.path.getsize(zip_compressed_path))}")
+    print(f"    压缩标识验证: 通过")
+
+    print("\n" + "-" * 60)
+    print("测试 34: 批量嵌入 + 分段存储模式")
+    print("-" * 60)
+    Base64ImageService.set_segment_length(50)
+    zip_segmented_path = os.path.join(test_dir, 'batch_segmented.zip')
+    Base64ImageService.batch_embed_to_zip(
+        batch_images, output_path=zip_segmented_path,
+        include_html=False, include_json=True, include_manifest=True,
+        compress=False, segmented=True
+    )
+    assert os.path.isfile(zip_segmented_path), "分段模式 ZIP 未生成"
+
+    with zf.ZipFile(zip_segmented_path, 'r') as zs:
+        json_raw = zs.read('images.json').decode('utf-8')
+        json_data = json.loads(json_raw)
+        first_key = list(json_data.keys())[0]
+        assert json_data[first_key]['segmented'] == True, "segmented 标记应为 True"
+        assert 'data' in json_data[first_key], "应包含分段 data"
+        assert 'segments' in json_data[first_key]['data'], "应包含 segments 列表"
+
+    Base64ImageService.set_segment_length(Base64ImageService.DEFAULT_SEGMENT_LENGTH)
+    print(f"[✓] 分段模式批量嵌入成功")
+    print(f"    ZIP 大小: {Base64ImageService._format_size(os.path.getsize(zip_segmented_path))}")
+    print(f"    分段数据验证: 通过")
+
+    print("\n" + "-" * 60)
+    print("测试 35: 空列表和不存在文件异常处理")
+    print("-" * 60)
+    try:
+        Base64ImageService.batch_embed_to_zip([], output_path=os.path.join(test_dir, 'empty.zip'))
+        assert False, "空列表应抛出 ValueError"
+    except ValueError:
+        print("[✓] 空列表正确抛出 ValueError")
+
+    try:
+        Base64ImageService.batch_embed_to_zip(
+            [{'path': 'nonexistent.png', 'key': 'x'}],
+            output_path=os.path.join(test_dir, 'bad.zip')
+        )
+        assert False, "不存在文件应抛出 FileNotFoundError"
+    except FileNotFoundError:
+        print("[✓] 不存在文件正确抛出 FileNotFoundError")
+
+    print("\n" + "=" * 60)
+    print(f"所有 {35} 项测试通过! ✓")
     print("=" * 60)
     print(f"\n测试输出目录: {test_dir}")
     print("\n生成的文件:")
